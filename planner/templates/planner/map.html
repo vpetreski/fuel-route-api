@@ -125,7 +125,7 @@
       const marker = addMarker(stop.longitude, stop.latitude, "#f59e0b", stop.number,
         `<b>${stop.number}. ${esc(stop.name)}</b><br>${esc(stop.address)}, ${esc(stop.city)}, ${esc(stop.state)}<br>` +
         `Mile ${num(stop.miles_from_start)} · arrive with ${num(stop.fuel_on_arrival_gallons)} gal<br>` +
-        (stop.location_precision === "city" ? `<small>Location approximate (town centre)</small><br>` : "") +
+        (stop.location_precision === "city" ? `<small>Location approximate (town center)</small><br>` : "") +
         `<b>$${num(stop.price_per_gallon, 3)}/gal</b> · buy ${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}`);
       const li = row(`<span class="badge">${stop.number}</span><div><b>${esc(stop.name)}</b><small>${esc(stop.city)}, ${esc(stop.state)} · mile ${num(stop.miles_from_start, 0)}</small></div>` +
                      `<div class="right"><b>$${num(stop.price_per_gallon, 3)}</b><small>${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}</small></div>`);

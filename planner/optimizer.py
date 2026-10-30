@@ -13,7 +13,7 @@ Driving to the next station shifts the array by the distance. Stopping at a stat
 for the detour fuel, a fixed `stop_penalty`, and `price * amount` for the fuel bought. Because the
 price is linear, the best way to leave with t steps is a running minimum over the arrival levels
 a <= t, so one station is O(K) array work and the whole plan O(n * K) for n stations and K fuel
-levels. Plans for coast-to-coast routes (hundreds of candidates) take a few milliseconds.
+levels. Plans for coast-to-coast routes (hundreds of candidates) take about ten milliseconds.
 
 With no detours and no penalty this reproduces the classic optimal greedy for the gas station
 problem (buy just enough to reach the next cheaper station in range, otherwise fill up); the DP
