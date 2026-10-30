@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if trip %}{{ trip.start.label }} → {{ trip.finish.label }} · Fuel plan{% else %}Fuel plan{% endif %}</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"
+        integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
+  <style>
+    :root {
+      --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; --panel: #ffffff; --accent: #2563eb;
+      --fuel: #f59e0b; --start: #16a34a; --finish: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: #f8fafc; }
+    .panel { width: 380px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); box-shadow: 2px 0 12px rgba(15, 23, 42, .06); z-index: 1000; }
+    .panel header { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+    .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    h1 { font-size: 19px; margin: 4px 0 0; line-height: 1.3; }
+    h1 .arrow { color: var(--muted); font-weight: 400; margin: 0 4px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+    .stats div { background: var(--panel); padding: 12px 14px; }
+    .stats span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .stats strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+    .stats .cost strong { color: var(--accent); }
+    .stops { list-style: none; margin: 0; padding: 6px 0; overflow-y: auto; flex: 1; }
+    .stops li { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 10px 22px; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+    .stops li:hover { background: #f8fafc; }
+    .stops .endpoint { cursor: default; color: var(--muted); }
+    .badge { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #fff; background: var(--fuel); box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,.25); }
+    .badge.start { background: var(--start); } .badge.finish { background: var(--finish); }
+    .stops b { display: block; font-weight: 600; }
+    .stops small { color: var(--muted); }
+    .stops .right { text-align: right; font-variant-numeric: tabular-nums; }
+    .panel footer { padding: 12px 22px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+    #map { flex: 1; }
+    .pin { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 700 12px/1 -apple-system, sans-serif; border: 2px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,.35); cursor: pointer; }
+    .maplibregl-popup-content { font-size: 13px; line-height: 1.5; padding: 10px 14px; border-radius: 8px; }
+    .maplibregl-popup-content b { font-size: 14px; }
+    .error { margin: auto; max-width: 520px; padding: 28px 32px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 30px rgba(15,23,42,.08); }
+    .error h1 { margin-bottom: 8px; }
+    @media (max-width: 760px) { body { flex-direction: column; } .panel { width: 100%; max-height: 45%; } }
+  </style>
+</head>
+<body>
+{% if error %}
+  <div class="error"><div class="eyebrow">Fuel plan</div><h1>Could not plan this trip</h1><p>{{ error }}</p></div>
+{% else %}
+  <aside class="panel">
+    <header>
+      <div class="eyebrow">Fuel plan</div>
+      <h1>{{ trip.start.label }}<span class="arrow">→</span>{{ trip.finish.label }}</h1>
+    </header>
+    <section class="stats" id="stats"></section>
+    <ol class="stops" id="stops"></ol>
+    <footer id="notes"></footer>
+  </aside>
+  <main id="map"></main>
+  {{ trip|json_script:"trip-data" }}
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"
+          integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
+  <script>
+    const trip = JSON.parse(document.getElementById("trip-data").textContent);
+    const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+    const num = (v, d = 1) => Number(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const hours = (h) => `${Math.floor(h)} h ${String(Math.round((h % 1) * 60)).padStart(2, "0")} m`;
+
+    const s = trip.summary;
+    document.getElementById("stats").innerHTML = [
+      ["Distance", `${num(trip.route.distance_miles, 0)} mi`],
+      ["Drive time", hours(trip.route.duration_hours)],
+      ["Fuel cost", usd.format(s.total_fuel_cost), "cost"],
+      ["Stops", s.number_of_stops],
+      ["Gallons bought", num(s.gallons_purchased)],
+      ["Avg price", s.average_price_per_gallon ? `$${num(s.average_price_per_gallon, 3)}` : "—"],
+    ].map(([label, value, cls]) => `<div class="${cls || ""}"><span>${label}</span><strong>${value}</strong></div>`).join("");
+
+    const v = trip.vehicle;
+    document.getElementById("notes").innerHTML =
+      `Range ${num(v.max_range_miles, 0)} mi · ${num(v.mpg, 0)} mpg · ${num(v.tank_gallons, 0)} gal tank · ` +
+      `starts with ${num(v.start_fuel_gallons)} gal. Routing: ${esc(trip.route.provider.toUpperCase())}. ` +
+      `${esc(trip.meta.attribution)}`;
+
+    const line = trip.map.geojson.features.find((f) => f.properties.kind === "route");
+    const bounds = line.geometry.coordinates.reduce(
+      (b, [lon, lat]) => [[Math.min(b[0][0], lon), Math.min(b[0][1], lat)], [Math.max(b[1][0], lon), Math.max(b[1][1], lat)]],
+      [[180, 90], [-180, -90]],
+    );
+    const map = new maplibregl.Map({
+      container: "map",
+      style: "https://tiles.openfreemap.org/styles/positron",
+      bounds,
+      fitBoundsOptions: { padding: 60 },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.on("load", () => {
+      map.addSource("route", { type: "geojson", data: line });
+      const layout = { "line-join": "round", "line-cap": "round" };
+      map.addLayer({ id: "route-casing", type: "line", source: "route", layout, paint: { "line-color": "#ffffff", "line-width": 8 } });
+      map.addLayer({ id: "route", type: "line", source: "route", layout, paint: { "line-color": "#2563eb", "line-width": 4.5 } });
+    });
+
+    const pin = (color, text) => {
+      const el = document.createElement("div");
+      el.className = "pin";
+      el.style.background = color;
+      el.textContent = text;
+      return el;
+    };
+    const addMarker = (lon, lat, color, text, html) =>
+      new maplibregl.Marker({ element: pin(color, text) })
+        .setLngLat([lon, lat])
+        .setPopup(new maplibregl.Popup({ offset: 16, maxWidth: "300px" }).setHTML(html))
+        .addTo(map);
+
+    addMarker(trip.start.longitude, trip.start.latitude, "#16a34a", "A", `<b>Start</b><br>${esc(trip.start.label)}`);
+    addMarker(trip.finish.longitude, trip.finish.latitude, "#dc2626", "B", `<b>Finish</b><br>${esc(trip.finish.label)}`);
+
+    const list = document.getElementById("stops");
+    const row = (html, cls = "") => { const li = document.createElement("li"); li.className = cls; li.innerHTML = html; list.appendChild(li); return li; };
+    row(`<span class="badge start">A</span><div><b>${esc(trip.start.label)}</b><small>Start · ${num(v.start_fuel_gallons)} gal in the tank</small></div><div></div>`, "endpoint");
+    trip.fuel_stops.forEach((stop) => {
+      const marker = addMarker(stop.longitude, stop.latitude, "#f59e0b", stop.number,
+        `<b>${stop.number}. ${esc(stop.name)}</b><br>${esc(stop.address)}, ${esc(stop.city)}, ${esc(stop.state)}<br>` +
+        `Mile ${num(stop.miles_from_start)} · arrive with ${num(stop.fuel_on_arrival_gallons)} gal<br>` +
+        `<b>$${num(stop.price_per_gallon, 3)}/gal</b> · buy ${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}`);
+      const li = row(`<span class="badge">${stop.number}</span><div><b>${esc(stop.name)}</b><small>${esc(stop.city)}, ${esc(stop.state)} · mile ${num(stop.miles_from_start, 0)}</small></div>` +
+                     `<div class="right"><b>$${num(stop.price_per_gallon, 3)}</b><small>${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}</small></div>`);
+      li.addEventListener("click", () => {
+        map.flyTo({ center: [stop.longitude, stop.latitude], zoom: 10, duration: 900 });
+        if (!marker.getPopup().isOpen()) marker.togglePopup();
+      });
+    });
+    if (!trip.fuel_stops.length) row(`<span></span><div><small>No stop needed: the trip fits in the fuel already on board.</small></div><div></div>`, "endpoint");
+    row(`<span class="badge finish">B</span><div><b>${esc(trip.finish.label)}</b><small>Finish · ${num(v.end_fuel_gallons)} gal left</small></div><div></div>`, "endpoint");
+  </script>
+{% endif %}
+</body>
+</html>
