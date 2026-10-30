@@ -25,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/', timeout=4)"
 
 # The schema and the station data are loaded on start (about two seconds, idempotent).
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py import_fuel_prices && exec gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 3 --preload --access-logfile -"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py import_fuel_prices && exec gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 3 --timeout 60 --preload --access-logfile -"]

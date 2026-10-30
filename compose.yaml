@@ -1,6 +1,9 @@
 services:
   api:
     build: .
+    env_file:
+      - path: .env  # optional: copy .env.example to .env to change settings
+        required: false
     ports:
       - "8000:8000"
     environment:
