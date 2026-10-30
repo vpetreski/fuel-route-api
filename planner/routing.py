@@ -1,7 +1,7 @@
 """Driving routes from public OpenStreetMap routing engines, with caching.
 
 One route request per trip: the response carries the full geometry, which is all the planner
-needs. OSRM is tried first; Valhalla is only called if OSRM cannot be reached.
+needs. OSRM is tried first; Valhalla only when OSRM fails (no answer, an error or a rate limit).
 """
 
 import hashlib
@@ -114,29 +114,27 @@ PROVIDERS = {"osrm": lambda: OSRM(settings.OSRM_BASE_URL), "valhalla": lambda: V
 
 
 def get_route(start, finish) -> RouteResult:
-    key = (
-        "route:v1:"
-        + hashlib.sha256(
-            f"{start.latitude:.5f},{start.longitude:.5f}|{finish.latitude:.5f},{finish.longitude:.5f}".encode()
-        ).hexdigest()
-    )
+    # The providers are part of the key: a route from another engine or profile is a different route.
+    engines = ",".join(settings.ROUTING_PROVIDERS) + f"|{settings.OSRM_BASE_URL}|{settings.VALHALLA_BASE_URL}"
+    points = f"{start.latitude:.5f},{start.longitude:.5f}|{finish.latitude:.5f},{finish.longitude:.5f}"
+    key = "route:v2:" + hashlib.sha256(f"{points}|{engines}".encode()).hexdigest()
     if (route := cache.get(key)) is not None:
         return RouteResult(route, cached=True, calls=0)
 
     calls = 0
-    failures = []
     for name in settings.ROUTING_PROVIDERS:
         provider = PROVIDERS[name]()
         calls += 1
         try:
             route = provider.route(start, finish)
         except ProviderError as exc:
-            logger.warning("routing provider failed: %s", exc)
-            failures.append(str(exc))
+            logger.warning("routing provider failed: %s", exc)  # details stay in the log
             continue
         cache.set(key, route, settings.ROUTE_CACHE_SECONDS)
         return RouteResult(route, cached=False, calls=calls)
-    raise UpstreamUnavailable("The routing service is unavailable, please retry shortly.", providers=failures)
+    raise UpstreamUnavailable(
+        "The routing service is unavailable, please retry shortly.", providers=list(settings.ROUTING_PROVIDERS)
+    )
 
 
 def _send(method: str, url: str, **kwargs) -> requests.Response:

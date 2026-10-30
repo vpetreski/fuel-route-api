@@ -52,6 +52,7 @@ def test_plans_the_cheapest_stop(client, corridor_stops, osrm):
         "start_fuel_gallons": 50.0,
         "end_fuel_gallons": 0.0,
     }
+    assert body["options"] == {"stop_penalty": 5.0, "end_fuel_gallons": 0.0, "corridor_miles": 5.0}
 
     assert body["meta"]["external_api_calls"] == {"routing": 1, "geocoding": 0, "total": 1}
     assert body["meta"]["route_cached"] is False
@@ -96,6 +97,9 @@ def test_short_trip_needs_no_stop(client, corridor_stops, http):
         ({"start": "Chicago, IL"}, "finish"),
         ({**TRIP, "mpg": "-3"}, "mpg"),
         ({**TRIP, "start_fuel_gallons": "80"}, "start_fuel_gallons"),
+        ({**TRIP, "end_fuel_gallons": "60"}, "end_fuel_gallons"),
+        ({**TRIP, "mpg": "nan"}, "mpg"),
+        ({**TRIP, "max_range_miles": "inf"}, "max_range_miles"),
         ({**TRIP, "start": "x" * 300}, "start"),
     ],
 )
@@ -105,6 +109,38 @@ def test_invalid_parameters(client, params, field):
     error = response.json()["error"]
     assert error["code"] == "invalid_request"
     assert field in error["fields"]
+
+
+def test_json_body_rejects_non_finite_numbers(client):
+    body = '{"start": "Chicago, IL", "finish": "Denver, CO", "mpg": NaN}'
+    response = client.post(URL, body, content_type="application/json")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "parse_error"
+
+
+def test_same_fuel_at_both_ends_prices_all_the_fuel_burned(client, corridor_stops, osrm):
+    body = client.get(URL, {**TRIP, "start_fuel_gallons": 25, "end_fuel_gallons": 25}).json()
+    summary = body["summary"]
+    assert summary["gallons_purchased"] == pytest.approx(summary["fuel_used_gallons"], abs=0.02)
+    assert body["vehicle"]["end_fuel_gallons"] >= 24.99
+    assert body["options"]["end_fuel_gallons"] == 25.0
+
+
+def test_start_fuel_that_reaches_no_station(client, corridor_stops, osrm):
+    response = client.get(URL, {**TRIP, "start_fuel_gallons": 0})
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "start_fuel_too_low"
+    assert error["reach_miles"] == 0
+    assert error["first_station_mile"] == pytest.approx(52.4, abs=1)
+
+
+def test_clients_are_rate_limited(client, corridor_stops, osrm, monkeypatch):
+    from rest_framework.throttling import SimpleRateThrottle
+
+    monkeypatch.setattr(SimpleRateThrottle, "THROTTLE_RATES", {"anon": "2/minute"})
+    assert [client.get(URL, TRIP).status_code for _ in range(3)] == [200, 200, 429]
+    assert client.get(URL, TRIP).json()["error"]["code"] == "throttled"
 
 
 def test_location_outside_the_usa(client):

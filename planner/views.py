@@ -4,6 +4,7 @@ from django.conf import settings
 from django.shortcuts import render
 from django.urls import reverse
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from stations.index import get_station_index
@@ -22,7 +23,8 @@ class RouteView(APIView):
     GET  /api/v1/route/?start=Chicago, IL&finish=Denver, CO
     POST /api/v1/route/  {"start": "Chicago, IL", "finish": "Denver, CO"}
 
-    Optional: max_range_miles (500), mpg (10), start_fuel_gallons (full tank), stop_penalty.
+    Optional: max_range_miles (500), mpg (10), start_fuel_gallons (full tank), end_fuel_gallons (0),
+    stop_penalty (5).
     """
 
     def get(self, request):
@@ -46,6 +48,8 @@ class RouteView(APIView):
 
 def route_map(request):
     """The same plan on an interactive map (re-uses the cached route: no extra routing call)."""
+    if not AnonRateThrottle().allow_request(request, None):
+        return render(request, "planner/map.html", {"error": "Too many requests, please retry shortly."}, status=429)
     serializer = TripRequestSerializer(data=request.GET)
     if not serializer.is_valid():
         message = "Pass start and finish, e.g. ?start=Chicago, IL&finish=Denver, CO"

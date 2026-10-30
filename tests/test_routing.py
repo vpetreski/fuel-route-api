@@ -77,5 +77,14 @@ def test_valhalla_no_route(http, settings):
 def test_every_provider_down(http):
     http.get(OSRM, status=503, json={})
     http.post(VALHALLA_ROUTE, status=502, body="Bad gateway")
-    with pytest.raises(UpstreamUnavailable):
+    with pytest.raises(UpstreamUnavailable) as error:
         get_route(CHICAGO, DENVER)
+    assert error.value.details == {"providers": ["osrm", "valhalla"]}  # upstream messages stay in the log
+
+
+def test_cached_routes_are_per_provider_setup(http, settings, chicago_denver):
+    http.get(OSRM, json=chicago_denver)
+    get_route(CHICAGO, DENVER)
+    settings.OSRM_BASE_URL = "https://osrm.example.org"
+    http.get(re.compile(r"https://osrm\.example\.org/.*"), json=chicago_denver)
+    assert get_route(CHICAGO, DENVER).cached is False

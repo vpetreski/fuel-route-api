@@ -132,6 +132,9 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.BrowsableAPIRenderer",
     ],
     "EXCEPTION_HANDLER": "planner.exceptions.api_exception_handler",
+    # Uncached trips call free public services: limit how fast one client can trigger them.
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"anon": env("API_RATE_LIMIT", "60/minute")},
 }
 
 LOGGING = {
