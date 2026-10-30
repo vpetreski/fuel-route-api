@@ -1,8 +1,11 @@
 # Fuel Route API
 
-A Django REST API that takes a start and a finish anywhere in the USA and returns the driving route, the
-cheapest places to fuel up along it, and what the fuel will cost. The vehicle has a 500-mile range and
+A Django REST API that takes a start and a finish anywhere in the USA and returns the driving route, where
+to fuel up along it for the least money, and what that fuel costs. The vehicle has a 500-mile range and
 does 10 miles per gallon. Fuel prices come from the truck stop price list in `data/`.
+
+By default the truck leaves with a full tank, so the total is the fuel bought on the way. Give
+`start_fuel_gallons` and `end_fuel_gallons` the same value and the total covers all the fuel the trip burns.
 
 ```
 GET /api/v1/route/?start=Chicago, IL&finish=Denver, CO
@@ -16,14 +19,14 @@ coast.
 
 ## Running it
 
-**Docker** (nothing else needed):
+**Docker** (nothing else needed; settings go in an optional `.env`, see `.env.example`):
 
 ```bash
 docker compose up --build
 # http://localhost:8000/api/v1/route/?start=New%20York,%20NY&finish=Los%20Angeles,%20CA
 ```
 
-**Locally** (Python 3.12+):
+**Locally** (Python 3.12+; settings are environment variables, see `.env.example`):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -33,7 +36,8 @@ python manage.py import_fuel_prices      # ~2 s: 6,738 stops, coordinates includ
 python manage.py runserver
 ```
 
-A Postman collection with example requests, tests and a map visualisation is in `postman/`.
+A Postman collection with example requests, tests and a map visualisation is in `postman/`; `requests.http` has
+the same requests for the VS Code REST Client or the JetBrains HTTP client.
 
 ## API
 
@@ -45,7 +49,10 @@ A Postman collection with example requests, tests and a map visualisation is in 
 | `max_range_miles` | no | 500 | vehicle range on a full tank |
 | `mpg` | no | 10 | fuel economy |
 | `start_fuel_gallons` | no | full tank | fuel on board at the start |
+| `end_fuel_gallons` | no | 0 | fuel to arrive with, at least; equal to the start fuel, the total covers all the fuel burned |
 | `stop_penalty` | no | 5 | dollars charged per stop *when choosing* stops (see below); 0 gives the strictly cheapest plan |
+
+The response echoes the planning options in `options`.
 
 Response (route geometry shortened):
 
@@ -73,6 +80,7 @@ Response (route geometry shortened):
     }
   ],
   "vehicle": {"max_range_miles": 500.0, "mpg": 10.0, "tank_gallons": 50.0, "start_fuel_gallons": 50.0, "end_fuel_gallons": 0.0},
+  "options": {"stop_penalty": 5.0, "end_fuel_gallons": 0.0, "corridor_miles": 5.0},
   "map": {
     "url": "http://localhost:8000/api/v1/route/map/?start=Chicago%2C+IL&finish=Denver%2C+CO",
     "geojson": {"type": "FeatureCollection", "features": ["route line, start, finish and one point per stop"]}
@@ -87,7 +95,9 @@ Response (route geometry shortened):
 ```
 
 Note the first stop: it buys only 7.8 gallons, just enough to reach a station 98 miles on that is 2.8 cents
-cheaper, and buys the rest of the trip's fuel there.
+cheaper, and buys the rest of the trip's fuel there. The trip burns 100.28 gallons; the first 50 were in the
+tank at the start. With `start_fuel_gallons=25&end_fuel_gallons=25` the plan buys all 100.29 gallons the trip
+burns (three stops, $295.19).
 
 The map comes in two forms: `map.geojson` (renders as-is in geojson.io or any GIS tool), and `map.url`, an
 HTML page that draws the same plan on an interactive map. The page re-uses the cached route, so opening
@@ -101,7 +111,7 @@ it costs no routing call.
 
 ### Errors
 
-Every error has the same shape: `{"error": {"code": "...", "message": "...", ...}}`.
+Every error the API reports has the same shape: `{"error": {"code": "...", "message": "...", ...}}`.
 
 | Status | `code` | When |
 |---|---|---|
@@ -110,6 +120,8 @@ Every error has the same shape: `{"error": {"code": "...", "message": "...", ...
 | 422 | `location_outside_usa` | it resolves to a point outside the USA (swapped `lat,lon` gets a hint) |
 | 422 | `no_route` | no drivable route between the two points |
 | 422 | `no_fuel_stop_in_range` | a stretch of the route has no station within range (`gap_start_mile`, `gap_end_mile`) |
+| 422 | `start_fuel_too_low` | the fuel at the start reaches no station (`reach_miles`, `first_station_mile`) |
+| 429 | `throttled` | more than 60 requests a minute from one client (`API_RATE_LIMIT`) |
 | 503 | `upstream_unavailable` | the routing or geocoding service can't be reached |
 
 ## How it works
@@ -134,11 +146,14 @@ geocoders can't resolve. Geocoding 6,600 addresses on every start-up would also 
 So the stations are located once, and the result is committed as `data/station_locations.csv`
 (`manage.py locate_stations` rebuilds it):
 
-- **Exit precision (3,465 stops).** The address has an exit number, and OpenStreetMap has a motorway junction
+- **Exit precision (3,464 stops).** The address has an exit number, and OpenStreetMap has a motorway junction
   with that number within 25 miles of the stop's town. Exit numbers restart in every state, so the town picks
-  the right one. One Overpass query fetches every numbered junction in the country.
-- **Town precision (3,161 stops).** The town's point from the US Census Gazetteer, or from Nominatim for the
-  ~140 unincorporated places the Census doesn't list.
+  the right one. One Overpass query fetches every numbered motorway junction in the contiguous US; junctions
+  outside the US outline are dropped. The match uses the exit number, not the highway: for 375 stops another
+  junction with the same number is near the town (usually on another highway), and the nearest one is taken.
+- **Town precision (3,162 stops).** The town's point from the US Census Gazetteer, or from Nominatim for the
+  144 places the Census doesn't list. These positions are approximate: the distance from the route is the
+  town's, and the map says so.
 
 ### 3. Start and finish without extra calls
 
@@ -151,7 +166,8 @@ Honolulu are accepted.
 ### 4. One routing call
 
 The route comes from the public OSRM server: one request returns the full geometry, distance and duration.
-If OSRM can't be reached the request falls back to Valhalla, also keyless; only then are two calls made.
+If OSRM fails (no answer, an HTTP error or a rate limit) the request falls back to Valhalla, also keyless;
+only then are two calls made.
 Routes are cached for a week by rounded coordinates, so repeated trips, map pages and
 different vehicle settings for the same trip cost no call. Every response reports exactly how many external
 calls it made (`meta.external_api_calls`).
@@ -175,8 +191,8 @@ matter here:
   effective", so each stop carries a small cost (`stop_penalty`, default $5) when stops are chosen. The
   reported cost is fuel only.
 
-So the planner (`planner/optimizer.py`) is an exact dynamic program over *(station, fuel in the tank)*, with
-fuel counted in steps of 0.25 miles of range:
+So the planner (`planner/optimizer.py`) is a dynamic program over *(station, fuel in the tank)* that is exact on
+a grid of fuel levels, counted in steps of 0.25 miles of range:
 
 ```
 cost[f]  = cheapest way to be at the current point with f steps of fuel
@@ -202,8 +218,10 @@ The tests check it against independent solvers on hundreds of random instances:
 
 ### Assumptions
 
-- The vehicle starts with a full tank (`start_fuel_gallons` changes that) and may finish nearly empty. "Total
-  money spent" is the fuel bought along the way, so a trip within one tank costs $0.
+- The vehicle starts with a full tank (`start_fuel_gallons` changes that) and may finish nearly empty
+  (`end_fuel_gallons` sets a minimum). "Total money spent" is the fuel bought along the way, so a trip within one
+  tank costs $0; with the same start and end fuel it is the cost of all the fuel the trip burns.
+- No reserve: a stop may be reached with an empty tank.
 - The vehicle can buy any amount at a stop; prices are the list prices in the file.
 - Distances are rounded up by less than a mile per leg when choosing stops, so a leg that would leave less
   than a mile of fuel to spare counts as out of range.
@@ -226,7 +244,7 @@ tests/        pytest suite (no network: HTTP is mocked; `pytest -m live` hits th
 ## Tests
 
 ```bash
-pytest              # 96 tests, ~3 s, no network
+pytest              # 109 tests, ~3 s, no network
 pytest --cov        # coverage ~96%
 pytest -m live      # one real coast-to-coast request
 ruff check . && ruff format --check .
@@ -237,10 +255,12 @@ CI runs the same on every push (`.github/workflows/ci.yml`).
 ## Data and services
 
 - Fuel prices: `data/fuel-prices-for-be-assessment.csv` (OPIS truck stop prices, as provided).
+- Station positions: `data/station_locations.csv`, derived from OpenStreetMap junctions (ODbL) and Census places.
 - US Census Bureau Gazetteer files 2026 and cartographic boundaries 2025 (public domain).
 - Routing: [OSRM](https://project-osrm.org/) and [Valhalla](https://valhalla.github.io/valhalla/) public servers
   run by FOSSGIS; junctions from OpenStreetMap via Overpass; map tiles from [OpenFreeMap](https://openfreemap.org/).
   Map data © OpenStreetMap contributors (ODbL).
 
 The public routing servers allow about one request per second and ask for an identifying User-Agent. The client
-spaces its requests and sends one (`OUTBOUND_USER_AGENT`). For production you'd self-host OSRM or use a paid plan.
+spaces its requests per host (in each worker process) and sends one (`OUTBOUND_USER_AGENT`), and the API limits
+each client to 60 requests a minute. For production you'd self-host OSRM or use a paid plan.
