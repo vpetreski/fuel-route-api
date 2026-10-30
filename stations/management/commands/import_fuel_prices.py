@@ -16,7 +16,7 @@ class Command(BaseCommand):
     help = "Replace all truck stops and prices with the contents of the price file (idempotent)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--csv", type=Path, default=settings.DATA_DIR / "fuel-prices-for-be-assessment.csv")
+        parser.add_argument("--csv", type=Path, default=settings.DATA_DIR / "fuel-prices.csv")
         parser.add_argument("--locations", type=Path, default=settings.DATA_DIR / "station_locations.csv")
 
     def handle(self, *args, **options):

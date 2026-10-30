@@ -140,7 +140,7 @@ start, finish ──► resolve locations ──► one routing call ──► s
 
 ### 1. The price list
 
-`data/fuel-prices-for-be-assessment.csv` has 8,151 rows but 6,738 truck stops: 678 stops appear several times
+`data/fuel-prices.csv` has 8,151 rows but 6,738 truck stops: 678 stops appear several times
 with prices up to $0.90 apart, and 26 rows are exact duplicates. `import_fuel_prices` keeps every price row
 (`FuelPrice`) and gives each stop (`TruckStop`) the mean of its prices, so one noisy row can't make a stop look
 cheap. It also repairs mis-encoded names (`Stuckeyâ€™s` → `Stuckey’s`). 112 stops in Canada are kept but
@@ -262,7 +262,7 @@ CI runs the same on every push (`.github/workflows/ci.yml`).
 
 ## Data and services
 
-- Fuel prices: `data/fuel-prices-for-be-assessment.csv` (OPIS truck stop prices, as provided).
+- Fuel prices: `data/fuel-prices.csv` (OPIS truck stop prices).
 - Station positions: `data/station_locations.csv`, derived from OpenStreetMap junctions (ODbL) and Census places.
 - US Census Bureau Gazetteer files 2026 and cartographic boundaries 2025 (public domain).
 - Routing: [OSRM](https://project-osrm.org/) and [Valhalla](https://valhalla.github.io/valhalla/) public servers

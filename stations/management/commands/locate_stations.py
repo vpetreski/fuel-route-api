@@ -45,7 +45,7 @@ class Command(BaseCommand):
     help = __doc__.split("\n\n")[0]
 
     def add_arguments(self, parser):
-        parser.add_argument("--csv", type=Path, default=settings.DATA_DIR / "fuel-prices-for-be-assessment.csv")
+        parser.add_argument("--csv", type=Path, default=settings.DATA_DIR / "fuel-prices.csv")
         parser.add_argument("--output", type=Path, default=settings.DATA_DIR / "station_locations.csv")
         parser.add_argument("--cache-dir", type=Path, default=settings.BASE_DIR / ".cache" / "locate")
         parser.add_argument("--no-exits", action="store_true", help="skip the OpenStreetMap exit pass")
