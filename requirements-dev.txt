@@ -1,0 +1,8 @@
+-r requirements.txt
+pytest==9.2.0
+pytest-django==4.14.0
+pytest-cov==7.1.0
+responses==0.26.3
+ruff==0.17.3
+# only for scripts/build_geodata.py
+pyshp==3.1.6

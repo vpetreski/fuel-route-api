@@ -1,0 +1,28 @@
+[project]
+name = "fuel-route-api"
+version = "1.0.0"
+description = "Django API that plans the cheapest fuel stops along a US driving route."
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "DJ"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "geo", "planner", "stations"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["tests"]
+addopts = "-m 'not live'"
+markers = ["live: calls the public routing services over the network (run with -m live)"]
+filterwarnings = ["error::RuntimeWarning"]
+
+[tool.coverage.run]
+source = ["geo", "planner", "stations"]
+omit = ["*/migrations/*", "stations/management/commands/locate_stations.py"]
