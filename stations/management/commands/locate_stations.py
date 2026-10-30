@@ -5,12 +5,12 @@ US-69"), which street geocoders cannot resolve. Two passes, best first:
 
 1. exit: the address gives an exit number ("EXIT 283") and OpenStreetMap has a motorway junction
    with that number within 25 miles of the stop's town. Exit numbers are mileposts that restart in
-   every state, so the town picks the right one; two exits with the same number that close
-   together are rare, and the nearest one wins.
+   every state, so the town picks the right one. When two highways near the town both have that
+   exit number, the junction nearest the town wins; the run reports how often that happens.
 2. city: the town's centroid from the Census Gazetteer, or from Nominatim for the few
    unincorporated places the Gazetteer lacks.
 
-One Overpass query (all numbered junctions) and about a hundred Nominatim lookups, so it is run
+One Overpass query (all numbered junctions) and about 150 Nominatim lookups, so it is run
 once and the output is committed; `import_fuel_prices` only reads the CSV. Responses are cached
 in --cache-dir.
 """
@@ -26,6 +26,7 @@ import requests
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
+from geo.boundary import Boundary
 from geo.distance import haversine_miles
 from geo.gazetteer import Gazetteer
 from stations.importer import read_stations
@@ -119,7 +120,7 @@ class Command(BaseCommand):
     def refine_exits(self, stations, located):
         refs, lats, lons = self.junctions()
         numbers = np.char.rstrip(refs, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        wanted = distances = 0
+        wanted = distances = ambiguous = 0
         spread = []
         for station in stations:
             match = EXIT.search(station.address)
@@ -137,14 +138,19 @@ class Command(BaseCommand):
             d = haversine_miles(town_lat, town_lon, lats[mask], lons[mask])
             best = int(np.argmin(d))
             if d[best] <= MAX_EXIT_DISTANCE_MILES:
-                located[station.opis_id] = (float(lats[mask][best]), float(lons[mask][best]), "exit")
+                lat, lon = float(lats[mask][best]), float(lons[mask][best])
+                located[station.opis_id] = (lat, lon, "exit")
                 distances += 1
                 spread.append(float(d[best]))
+                # Another junction with the same number near the town, and not part of the same interchange.
+                apart = haversine_miles(lat, lon, lats[mask], lons[mask])
+                ambiguous += bool(((d <= MAX_EXIT_DISTANCE_MILES) & (apart > 3)).any())
         if spread:
             q = np.percentile(spread, [50, 90, 99])
             self.stdout.write(
                 f"exit matches: {distances} of {wanted} addresses with an exit number; distance from the town "
-                f"centroid: median {q[0]:.1f} mi, p90 {q[1]:.1f}, p99 {q[2]:.1f}"
+                f"centroid: median {q[0]:.1f} mi, p90 {q[1]:.1f}, p99 {q[2]:.1f}; {ambiguous} with another "
+                f"junction of the same number near the town (nearest taken)"
             )
 
     def junctions(self):
@@ -160,11 +166,16 @@ class Command(BaseCommand):
                 time.sleep(60 * (attempt + 1))
             else:
                 raise RuntimeError("Overpass did not answer")
+        # The bounding box also takes in southern Canada and northern Mexico: keep US junctions only.
+        usa = Boundary.from_file(settings.DATA_DIR / "us_boundary.json.gz")
+        elements = json.loads(cache.read_text())["elements"]
         refs, lats, lons = [], [], []
-        for element in json.loads(cache.read_text())["elements"]:
+        for element in elements:
+            if not usa.contains(element["lat"], element["lon"], 0.25):
+                continue
             for ref in element["tags"]["ref"].split(";"):
                 refs.append(normalize_exit(ref))
                 lats.append(element["lat"])
                 lons.append(element["lon"])
-        self.stdout.write(f"{len(refs)} numbered motorway junctions")
+        self.stdout.write(f"{len(refs)} numbered motorway junctions in the US ({len(elements)} in the bounding box)")
         return np.array(refs, dtype=str), np.array(lats), np.array(lons)

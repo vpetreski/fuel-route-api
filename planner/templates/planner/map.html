@@ -79,9 +79,9 @@
 
     const v = trip.vehicle;
     document.getElementById("notes").innerHTML =
-      `Range ${num(v.max_range_miles, 0)} mi · ${num(v.mpg, 0)} mpg · ${num(v.tank_gallons, 0)} gal tank · ` +
-      `starts with ${num(v.start_fuel_gallons)} gal. Routing: ${esc(trip.route.provider.toUpperCase())}. ` +
-      `${esc(trip.meta.attribution)}`;
+      `Range ${num(v.max_range_miles, 0)} mi · ${num(v.mpg, 0)} mpg · ${num(v.tank_gallons, 0)} gal tank. ` +
+      `Starts with ${num(v.start_fuel_gallons)} gal; the fuel cost is what is bought on the way. ` +
+      `Routing: ${esc(trip.route.provider.toUpperCase())}. ${esc(trip.meta.attribution)}`;
 
     const line = trip.map.geojson.features.find((f) => f.properties.kind === "route");
     const bounds = line.geometry.coordinates.reduce(
@@ -125,6 +125,7 @@
       const marker = addMarker(stop.longitude, stop.latitude, "#f59e0b", stop.number,
         `<b>${stop.number}. ${esc(stop.name)}</b><br>${esc(stop.address)}, ${esc(stop.city)}, ${esc(stop.state)}<br>` +
         `Mile ${num(stop.miles_from_start)} · arrive with ${num(stop.fuel_on_arrival_gallons)} gal<br>` +
+        (stop.location_precision === "city" ? `<small>Location approximate (town centre)</small><br>` : "") +
         `<b>$${num(stop.price_per_gallon, 3)}/gal</b> · buy ${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}`);
       const li = row(`<span class="badge">${stop.number}</span><div><b>${esc(stop.name)}</b><small>${esc(stop.city)}, ${esc(stop.state)} · mile ${num(stop.miles_from_start, 0)}</small></div>` +
                      `<div class="right"><b>$${num(stop.price_per_gallon, 3)}</b><small>${num(stop.gallons_purchased)} gal · ${usd.format(stop.cost)}</small></div>`);
