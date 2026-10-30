@@ -194,8 +194,8 @@ matter here:
 
 - **Detours.** A station 3 miles off the interstate costs 6 miles of fuel to use.
 - **Tiny stops.** When prices fall slowly along the way, the cheapest plan stops every 50 miles to buy a few
-  gallons. Coast to coast that's 13 stops to save $3.71 over 7 stops. "Optimal mostly means cost
-  effective", so each stop carries a small cost (`stop_penalty`, default $5) when stops are chosen. The
+  gallons. Coast to coast that's 13 stops to save $3.71 over 7 stops. A stop that saves cents isn't worth
+  making, so each stop carries a small cost (`stop_penalty`, default $5) when stops are chosen. The
   reported cost is fuel only.
 
 So the planner (`planner/optimizer.py`) is a dynamic program over *(station, fuel in the tank)* that is exact on
@@ -226,14 +226,15 @@ The tests check it against independent solvers on hundreds of random instances:
 ### Assumptions
 
 - The vehicle starts with a full tank (`start_fuel_gallons` changes that) and may finish nearly empty
-  (`end_fuel_gallons` sets a minimum). "Total money spent" is the fuel bought along the way, so a trip within one
+  (`end_fuel_gallons` sets a minimum). The total cost is the fuel bought along the way, so a trip within one
   tank costs $0; with the same start and end fuel it is the cost of all the fuel the trip burns.
 - No reserve: a stop may be reached with an empty tank.
 - The vehicle can buy any amount at a stop; prices are the list prices in the file.
 - Distances are rounded up by less than a mile per leg when choosing stops, so a leg that would leave less
-  than a mile of fuel to spare counts as out of range.
-- Routes are for cars (the public OSRM server has no truck profile); a truck profile is a configuration change
-  with a self-hosted OSRM or Valhalla (`costing: truck`).
+  than a mile of fuel to spare can count as out of range.
+- Routes are for cars (the public OSRM server has no truck profile). Truck routes need a self-hosted engine: OSRM
+  built with a truck profile (set `OSRM_BASE_URL`), or Valhalla with `costing: truck` (one line in
+  `planner/routing.py`).
 
 ## Project layout
 
