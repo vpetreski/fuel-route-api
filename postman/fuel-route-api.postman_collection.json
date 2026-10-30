@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "4c496eec-3af0-5552-a92a-712443a8e621",
     "name": "Fuel Route API",
-    "description": "Cheapest fuel stops along a US driving route. Start the server (`python manage.py runserver` or `docker compose up`), then send the requests in order. The Visualize tab of a plan shows the route and the stops.",
+    "description": "Cheapest fuel stops along a US driving route. Start the server (`python manage.py runserver` or `docker compose up`), then run the collection, or send the requests in order. The Visualize tab of a plan shows the route and the stops.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -51,91 +51,93 @@
     },
     {
       "name": "Plan a trip",
+      "description": "Every request in this folder runs the same checks (folder script): the fuel adds up leg by leg, the total is the sum of the stops, at most one routing call.",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "",
+              "pm.test(\"never runs dry, never overfills, fuel adds up leg by leg\", () => {",
+              "    const { mpg, tank_gallons, start_fuel_gallons, end_fuel_gallons } = body.vehicle;",
+              "    let fuel = start_fuel_gallons, mile = 0, detour = 0;",
+              "    for (const stop of body.fuel_stops) {",
+              "        const driven = stop.miles_from_start - mile + detour + stop.off_route_miles;",
+              "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.closeTo(fuel - driven / mpg, 0.03);",
+              "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.at.least(0);",
+              "        fuel = stop.fuel_on_arrival_gallons + stop.gallons_purchased;",
+              "        pm.expect(fuel, `tank after stop ${stop.number}`).to.be.at.most(tank_gallons + 0.01);",
+              "        mile = stop.miles_from_start;",
+              "        detour = stop.off_route_miles;",
+              "    }",
+              "    const driven = body.route.distance_miles - mile + detour;",
+              "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.closeTo(fuel - driven / mpg, 0.03);",
+              "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.at.least(0);",
+              "});",
+              "",
+              "pm.test(\"total cost is the sum of the stops\", () => {",
+              "    const sum = body.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
+              "    pm.expect(body.summary.total_fuel_cost).to.be.closeTo(sum, 0.05);",
+              "});",
+              "",
+              "pm.test(\"at most one routing call\", () => {",
+              "    pm.expect(body.meta.external_api_calls.routing).to.be.at.most(1);",
+              "});",
+              "",
+              "// Visualize tab: the stops, and the route drawn as an SVG (no map tiles needed).",
+              "const line = body.map.geojson.features.find((f) => f.properties.kind === \"route\").geometry.coordinates;",
+              "const lons = line.map((c) => c[0]), lats = line.map((c) => c[1]);",
+              "const kx = Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);",
+              "const minX = Math.min(...lons) * kx, maxX = Math.max(...lons) * kx, minY = Math.min(...lats), maxY = Math.max(...lats);",
+              "const W = 680, pad = 26;",
+              "let scale = (W - 2 * pad) / Math.max(maxX - minX, 1e-6);",
+              "if ((maxY - minY) * scale > 330) scale = 330 / Math.max(maxY - minY, 1e-6);",
+              "const H = Math.round((maxY - minY) * scale + 2 * pad);",
+              "const xy = ([lon, lat]) => [(pad + (lon * kx - minX) * scale).toFixed(1), (pad + (maxY - lat) * scale).toFixed(1)];",
+              "const path = line.map((c, i) => (i ? \"L\" : \"M\") + xy(c).join(\",\")).join(\" \");",
+              "const pin = (lon, lat, color, label) => {",
+              "    const [x, y] = xy([lon, lat]);",
+              "    return `<circle cx=\"${x}\" cy=\"${y}\" r=\"10\" fill=\"${color}\" stroke=\"#fff\" stroke-width=\"2\"/>` +",
+              "        `<text x=\"${x}\" y=\"${y}\" dy=\"3.5\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"700\" fill=\"#fff\">${label}</text>`;",
+              "};",
+              "const pins = [",
+              "    pin(body.start.longitude, body.start.latitude, \"#16a34a\", \"A\"),",
+              "    ...body.fuel_stops.map((s) => pin(s.longitude, s.latitude, \"#f59e0b\", s.number)),",
+              "    pin(body.finish.longitude, body.finish.latitude, \"#dc2626\", \"B\"),",
+              "].join(\"\");",
+              "const rows = body.fuel_stops.map((s) => `<tr><td><span class=\"n\">${s.number}</span></td><td>${s.name}<br><small>${s.city}, ${s.state} · mile ${Math.round(s.miles_from_start).toLocaleString()}</small></td><td>$${s.price_per_gallon.toFixed(3)}</td><td>${s.gallons_purchased.toFixed(1)} gal</td><td>$${s.cost.toFixed(2)}</td></tr>`).join(\"\");",
+              "pm.visualizer.set(`",
+              "<style>",
+              "  body { font: 13px -apple-system, \"Segoe UI\", Roboto, sans-serif; color: #0f172a; margin: 0; }",
+              "  header { padding: 12px 14px 6px; } h3 { margin: 0 0 4px; font-size: 15px; } .muted { color: #64748b; }",
+              "  svg { display: block; margin: 4px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }",
+              "  table { border-collapse: collapse; width: 100%; } td, th { padding: 7px 14px; border-top: 1px solid #e2e8f0; text-align: left; }",
+              "  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }",
+              "  .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }",
+              "</style>",
+              "<header>",
+              "  <h3>${body.start.label} → ${body.finish.label}</h3>",
+              "  <div class=\"muted\">${body.route.distance_miles.toLocaleString()} mi · ${body.summary.number_of_stops} stops ·",
+              "  fuel $${body.summary.total_fuel_cost.toFixed(2)} · ${body.meta.external_api_calls.routing} routing call(s)</div>",
+              "</header>",
+              "<svg width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">",
+              "  <path d=\"${path}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"7\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
+              "  <path d=\"${path}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"3.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
+              "  ${pins}",
+              "</svg>",
+              "<table><tr><th>#</th><th>Station</th><th>Price</th><th>Buy</th><th>Cost</th></tr>${rows}</table>",
+              "`);"
+            ]
+          }
+        }
+      ],
       "item": [
         {
           "name": "New York → Los Angeles",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "",
-                  "pm.test(\"never runs dry, never overfills, fuel adds up leg by leg\", () => {",
-                  "    const { mpg, tank_gallons, start_fuel_gallons, end_fuel_gallons } = body.vehicle;",
-                  "    let fuel = start_fuel_gallons, mile = 0, detour = 0;",
-                  "    for (const stop of body.fuel_stops) {",
-                  "        const driven = stop.miles_from_start - mile + detour + stop.off_route_miles;",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.at.least(0);",
-                  "        fuel = stop.fuel_on_arrival_gallons + stop.gallons_purchased;",
-                  "        pm.expect(fuel, `tank after stop ${stop.number}`).to.be.at.most(tank_gallons + 0.01);",
-                  "        mile = stop.miles_from_start;",
-                  "        detour = stop.off_route_miles;",
-                  "    }",
-                  "    const driven = body.route.distance_miles - mile + detour;",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.at.least(0);",
-                  "});",
-                  "",
-                  "pm.test(\"total cost is the sum of the stops\", () => {",
-                  "    const sum = body.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
-                  "    pm.expect(body.summary.total_fuel_cost).to.be.closeTo(sum, 0.05);",
-                  "});",
-                  "",
-                  "pm.test(\"at most one routing call\", () => {",
-                  "    pm.expect(body.meta.external_api_calls.routing).to.be.at.most(1);",
-                  "});",
-                  "",
-                  "// Visualize tab: the stops, and the route drawn as an SVG (no map tiles needed).",
-                  "const line = body.map.geojson.features.find((f) => f.properties.kind === \"route\").geometry.coordinates;",
-                  "const lons = line.map((c) => c[0]), lats = line.map((c) => c[1]);",
-                  "const kx = Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);",
-                  "const minX = Math.min(...lons) * kx, maxX = Math.max(...lons) * kx, minY = Math.min(...lats), maxY = Math.max(...lats);",
-                  "const W = 680, pad = 26;",
-                  "let scale = (W - 2 * pad) / Math.max(maxX - minX, 1e-6);",
-                  "if ((maxY - minY) * scale > 330) scale = 330 / Math.max(maxY - minY, 1e-6);",
-                  "const H = Math.round((maxY - minY) * scale + 2 * pad);",
-                  "const xy = ([lon, lat]) => [(pad + (lon * kx - minX) * scale).toFixed(1), (pad + (maxY - lat) * scale).toFixed(1)];",
-                  "const path = line.map((c, i) => (i ? \"L\" : \"M\") + xy(c).join(\",\")).join(\" \");",
-                  "const pin = (lon, lat, color, label) => {",
-                  "    const [x, y] = xy([lon, lat]);",
-                  "    return `<circle cx=\"${x}\" cy=\"${y}\" r=\"10\" fill=\"${color}\" stroke=\"#fff\" stroke-width=\"2\"/>` +",
-                  "        `<text x=\"${x}\" y=\"${y}\" dy=\"3.5\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"700\" fill=\"#fff\">${label}</text>`;",
-                  "};",
-                  "const pins = [",
-                  "    pin(body.start.longitude, body.start.latitude, \"#16a34a\", \"A\"),",
-                  "    ...body.fuel_stops.map((s) => pin(s.longitude, s.latitude, \"#f59e0b\", s.number)),",
-                  "    pin(body.finish.longitude, body.finish.latitude, \"#dc2626\", \"B\"),",
-                  "].join(\"\");",
-                  "const rows = body.fuel_stops.map((s) => `<tr><td><span class=\"n\">${s.number}</span></td><td>${s.name}<br><small>${s.city}, ${s.state} · mile ${Math.round(s.miles_from_start).toLocaleString()}</small></td><td>$${s.price_per_gallon.toFixed(3)}</td><td>${s.gallons_purchased.toFixed(1)} gal</td><td>$${s.cost.toFixed(2)}</td></tr>`).join(\"\");",
-                  "pm.visualizer.set(`",
-                  "<style>",
-                  "  body { font: 13px -apple-system, \"Segoe UI\", Roboto, sans-serif; color: #0f172a; margin: 0; }",
-                  "  header { padding: 12px 14px 6px; } h3 { margin: 0 0 4px; font-size: 15px; } .muted { color: #64748b; }",
-                  "  svg { display: block; margin: 4px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }",
-                  "  table { border-collapse: collapse; width: 100%; } td, th { padding: 7px 14px; border-top: 1px solid #e2e8f0; text-align: left; }",
-                  "  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }",
-                  "  .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }",
-                  "</style>",
-                  "<header>",
-                  "  <h3>${body.start.label} → ${body.finish.label}</h3>",
-                  "  <div class=\"muted\">${body.route.distance_miles.toLocaleString()} mi · ${body.summary.number_of_stops} stops ·",
-                  "  fuel $${body.summary.total_fuel_cost.toFixed(2)} · ${body.meta.external_api_calls.routing} routing call(s)</div>",
-                  "</header>",
-                  "<svg width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"7\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"3.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  ${pins}",
-                  "</svg>",
-                  "<table><tr><th>#</th><th>Station</th><th>Price</th><th>Buy</th><th>Cost</th></tr>${rows}</table>",
-                  "`);"
-                ]
-              }
-            }
-          ],
+          "event": [],
           "request": {
             "method": "GET",
             "header": [
@@ -170,7 +172,184 @@
           }
         },
         {
-          "name": "New York → Los Angeles (again: cached)",
+          "name": "Chicago → Denver (POST, half a tank)",
+          "event": [],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Chicago, IL\",\n  \"finish\": \"Denver, CO\",\n  \"start_fuel_gallons\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ]
+            },
+            "description": "Options in a JSON body: max_range_miles, mpg, start_fuel_gallons, end_fuel_gallons and stop_penalty are optional."
+          }
+        },
+        {
+          "name": "Seattle → Miami, cheapest possible (stop_penalty=0)",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/?start=Seattle, WA&finish=Miami, FL&stop_penalty=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Seattle, WA"
+                },
+                {
+                  "key": "finish",
+                  "value": "Miami, FL"
+                },
+                {
+                  "key": "stop_penalty",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "stop_penalty=0 returns the strictly cheapest plan, which uses more stops."
+          }
+        },
+        {
+          "name": "Coordinates and ZIP codes",
+          "event": [],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/?start=41.8781,-87.6298&finish=77002",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "41.8781,-87.6298"
+                },
+                {
+                  "key": "finish",
+                  "value": "77002"
+                }
+              ]
+            },
+            "description": "Chicago (lat,lon) to downtown Houston (ZIP). Both are resolved offline."
+          }
+        },
+        {
+          "name": "Whole-trip fuel cost (same fuel at both ends)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"buys exactly the fuel the trip burns\", () => {",
+                  "    const { summary } = pm.response.json();",
+                  "    pm.expect(summary.gallons_purchased).to.be.closeTo(summary.fuel_used_gallons, 0.05);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/?start=Chicago, IL&finish=Denver, CO&start_fuel_gallons=25&end_fuel_gallons=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Denver, CO"
+                },
+                {
+                  "key": "start_fuel_gallons",
+                  "value": "25"
+                },
+                {
+                  "key": "end_fuel_gallons",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "By default the truck starts full and the total is what is bought on the way. Starting and finishing with the same fuel makes the total the cost of all the fuel the trip burns."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache, short trips and the map page",
+      "item": [
+        {
+          "name": "New York → Los Angeles again (cached)",
           "event": [
             {
               "listen": "test",
@@ -219,364 +398,6 @@
               ]
             },
             "description": ""
-          }
-        },
-        {
-          "name": "Chicago → Denver (POST, half a tank)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "",
-                  "pm.test(\"never runs dry, never overfills, fuel adds up leg by leg\", () => {",
-                  "    const { mpg, tank_gallons, start_fuel_gallons, end_fuel_gallons } = body.vehicle;",
-                  "    let fuel = start_fuel_gallons, mile = 0, detour = 0;",
-                  "    for (const stop of body.fuel_stops) {",
-                  "        const driven = stop.miles_from_start - mile + detour + stop.off_route_miles;",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.at.least(0);",
-                  "        fuel = stop.fuel_on_arrival_gallons + stop.gallons_purchased;",
-                  "        pm.expect(fuel, `tank after stop ${stop.number}`).to.be.at.most(tank_gallons + 0.01);",
-                  "        mile = stop.miles_from_start;",
-                  "        detour = stop.off_route_miles;",
-                  "    }",
-                  "    const driven = body.route.distance_miles - mile + detour;",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.at.least(0);",
-                  "});",
-                  "",
-                  "pm.test(\"total cost is the sum of the stops\", () => {",
-                  "    const sum = body.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
-                  "    pm.expect(body.summary.total_fuel_cost).to.be.closeTo(sum, 0.05);",
-                  "});",
-                  "",
-                  "pm.test(\"at most one routing call\", () => {",
-                  "    pm.expect(body.meta.external_api_calls.routing).to.be.at.most(1);",
-                  "});",
-                  "",
-                  "// Visualize tab: the stops, and the route drawn as an SVG (no map tiles needed).",
-                  "const line = body.map.geojson.features.find((f) => f.properties.kind === \"route\").geometry.coordinates;",
-                  "const lons = line.map((c) => c[0]), lats = line.map((c) => c[1]);",
-                  "const kx = Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);",
-                  "const minX = Math.min(...lons) * kx, maxX = Math.max(...lons) * kx, minY = Math.min(...lats), maxY = Math.max(...lats);",
-                  "const W = 680, pad = 26;",
-                  "let scale = (W - 2 * pad) / Math.max(maxX - minX, 1e-6);",
-                  "if ((maxY - minY) * scale > 330) scale = 330 / Math.max(maxY - minY, 1e-6);",
-                  "const H = Math.round((maxY - minY) * scale + 2 * pad);",
-                  "const xy = ([lon, lat]) => [(pad + (lon * kx - minX) * scale).toFixed(1), (pad + (maxY - lat) * scale).toFixed(1)];",
-                  "const path = line.map((c, i) => (i ? \"L\" : \"M\") + xy(c).join(\",\")).join(\" \");",
-                  "const pin = (lon, lat, color, label) => {",
-                  "    const [x, y] = xy([lon, lat]);",
-                  "    return `<circle cx=\"${x}\" cy=\"${y}\" r=\"10\" fill=\"${color}\" stroke=\"#fff\" stroke-width=\"2\"/>` +",
-                  "        `<text x=\"${x}\" y=\"${y}\" dy=\"3.5\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"700\" fill=\"#fff\">${label}</text>`;",
-                  "};",
-                  "const pins = [",
-                  "    pin(body.start.longitude, body.start.latitude, \"#16a34a\", \"A\"),",
-                  "    ...body.fuel_stops.map((s) => pin(s.longitude, s.latitude, \"#f59e0b\", s.number)),",
-                  "    pin(body.finish.longitude, body.finish.latitude, \"#dc2626\", \"B\"),",
-                  "].join(\"\");",
-                  "const rows = body.fuel_stops.map((s) => `<tr><td><span class=\"n\">${s.number}</span></td><td>${s.name}<br><small>${s.city}, ${s.state} · mile ${Math.round(s.miles_from_start).toLocaleString()}</small></td><td>$${s.price_per_gallon.toFixed(3)}</td><td>${s.gallons_purchased.toFixed(1)} gal</td><td>$${s.cost.toFixed(2)}</td></tr>`).join(\"\");",
-                  "pm.visualizer.set(`",
-                  "<style>",
-                  "  body { font: 13px -apple-system, \"Segoe UI\", Roboto, sans-serif; color: #0f172a; margin: 0; }",
-                  "  header { padding: 12px 14px 6px; } h3 { margin: 0 0 4px; font-size: 15px; } .muted { color: #64748b; }",
-                  "  svg { display: block; margin: 4px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }",
-                  "  table { border-collapse: collapse; width: 100%; } td, th { padding: 7px 14px; border-top: 1px solid #e2e8f0; text-align: left; }",
-                  "  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }",
-                  "  .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }",
-                  "</style>",
-                  "<header>",
-                  "  <h3>${body.start.label} → ${body.finish.label}</h3>",
-                  "  <div class=\"muted\">${body.route.distance_miles.toLocaleString()} mi · ${body.summary.number_of_stops} stops ·",
-                  "  fuel $${body.summary.total_fuel_cost.toFixed(2)} · ${body.meta.external_api_calls.routing} routing call(s)</div>",
-                  "</header>",
-                  "<svg width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"7\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"3.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  ${pins}",
-                  "</svg>",
-                  "<table><tr><th>#</th><th>Station</th><th>Price</th><th>Buy</th><th>Cost</th></tr>${rows}</table>",
-                  "`);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"start\": \"Chicago, IL\",\n  \"finish\": \"Denver, CO\",\n  \"start_fuel_gallons\": 25\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/route/",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "route",
-                ""
-              ]
-            },
-            "description": "Options in a JSON body. start_fuel_gallons, mpg, max_range_miles and stop_penalty are optional."
-          }
-        },
-        {
-          "name": "Seattle → Miami, cheapest possible (stop_penalty=0)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "",
-                  "pm.test(\"never runs dry, never overfills, fuel adds up leg by leg\", () => {",
-                  "    const { mpg, tank_gallons, start_fuel_gallons, end_fuel_gallons } = body.vehicle;",
-                  "    let fuel = start_fuel_gallons, mile = 0, detour = 0;",
-                  "    for (const stop of body.fuel_stops) {",
-                  "        const driven = stop.miles_from_start - mile + detour + stop.off_route_miles;",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.at.least(0);",
-                  "        fuel = stop.fuel_on_arrival_gallons + stop.gallons_purchased;",
-                  "        pm.expect(fuel, `tank after stop ${stop.number}`).to.be.at.most(tank_gallons + 0.01);",
-                  "        mile = stop.miles_from_start;",
-                  "        detour = stop.off_route_miles;",
-                  "    }",
-                  "    const driven = body.route.distance_miles - mile + detour;",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.at.least(0);",
-                  "});",
-                  "",
-                  "pm.test(\"total cost is the sum of the stops\", () => {",
-                  "    const sum = body.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
-                  "    pm.expect(body.summary.total_fuel_cost).to.be.closeTo(sum, 0.05);",
-                  "});",
-                  "",
-                  "pm.test(\"at most one routing call\", () => {",
-                  "    pm.expect(body.meta.external_api_calls.routing).to.be.at.most(1);",
-                  "});",
-                  "",
-                  "// Visualize tab: the stops, and the route drawn as an SVG (no map tiles needed).",
-                  "const line = body.map.geojson.features.find((f) => f.properties.kind === \"route\").geometry.coordinates;",
-                  "const lons = line.map((c) => c[0]), lats = line.map((c) => c[1]);",
-                  "const kx = Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);",
-                  "const minX = Math.min(...lons) * kx, maxX = Math.max(...lons) * kx, minY = Math.min(...lats), maxY = Math.max(...lats);",
-                  "const W = 680, pad = 26;",
-                  "let scale = (W - 2 * pad) / Math.max(maxX - minX, 1e-6);",
-                  "if ((maxY - minY) * scale > 330) scale = 330 / Math.max(maxY - minY, 1e-6);",
-                  "const H = Math.round((maxY - minY) * scale + 2 * pad);",
-                  "const xy = ([lon, lat]) => [(pad + (lon * kx - minX) * scale).toFixed(1), (pad + (maxY - lat) * scale).toFixed(1)];",
-                  "const path = line.map((c, i) => (i ? \"L\" : \"M\") + xy(c).join(\",\")).join(\" \");",
-                  "const pin = (lon, lat, color, label) => {",
-                  "    const [x, y] = xy([lon, lat]);",
-                  "    return `<circle cx=\"${x}\" cy=\"${y}\" r=\"10\" fill=\"${color}\" stroke=\"#fff\" stroke-width=\"2\"/>` +",
-                  "        `<text x=\"${x}\" y=\"${y}\" dy=\"3.5\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"700\" fill=\"#fff\">${label}</text>`;",
-                  "};",
-                  "const pins = [",
-                  "    pin(body.start.longitude, body.start.latitude, \"#16a34a\", \"A\"),",
-                  "    ...body.fuel_stops.map((s) => pin(s.longitude, s.latitude, \"#f59e0b\", s.number)),",
-                  "    pin(body.finish.longitude, body.finish.latitude, \"#dc2626\", \"B\"),",
-                  "].join(\"\");",
-                  "const rows = body.fuel_stops.map((s) => `<tr><td><span class=\"n\">${s.number}</span></td><td>${s.name}<br><small>${s.city}, ${s.state} · mile ${Math.round(s.miles_from_start).toLocaleString()}</small></td><td>$${s.price_per_gallon.toFixed(3)}</td><td>${s.gallons_purchased.toFixed(1)} gal</td><td>$${s.cost.toFixed(2)}</td></tr>`).join(\"\");",
-                  "pm.visualizer.set(`",
-                  "<style>",
-                  "  body { font: 13px -apple-system, \"Segoe UI\", Roboto, sans-serif; color: #0f172a; margin: 0; }",
-                  "  header { padding: 12px 14px 6px; } h3 { margin: 0 0 4px; font-size: 15px; } .muted { color: #64748b; }",
-                  "  svg { display: block; margin: 4px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }",
-                  "  table { border-collapse: collapse; width: 100%; } td, th { padding: 7px 14px; border-top: 1px solid #e2e8f0; text-align: left; }",
-                  "  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }",
-                  "  .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }",
-                  "</style>",
-                  "<header>",
-                  "  <h3>${body.start.label} → ${body.finish.label}</h3>",
-                  "  <div class=\"muted\">${body.route.distance_miles.toLocaleString()} mi · ${body.summary.number_of_stops} stops ·",
-                  "  fuel $${body.summary.total_fuel_cost.toFixed(2)} · ${body.meta.external_api_calls.routing} routing call(s)</div>",
-                  "</header>",
-                  "<svg width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"7\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"3.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  ${pins}",
-                  "</svg>",
-                  "<table><tr><th>#</th><th>Station</th><th>Price</th><th>Buy</th><th>Cost</th></tr>${rows}</table>",
-                  "`);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/route/?start=Seattle, WA&finish=Miami, FL&stop_penalty=0",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "route",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "start",
-                  "value": "Seattle, WA"
-                },
-                {
-                  "key": "finish",
-                  "value": "Miami, FL"
-                },
-                {
-                  "key": "stop_penalty",
-                  "value": "0"
-                }
-              ]
-            },
-            "description": "stop_penalty=0 returns the strictly cheapest plan, which uses more stops."
-          }
-        },
-        {
-          "name": "Coordinates and ZIP codes",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
-                  "const body = pm.response.json();",
-                  "",
-                  "pm.test(\"never runs dry, never overfills, fuel adds up leg by leg\", () => {",
-                  "    const { mpg, tank_gallons, start_fuel_gallons, end_fuel_gallons } = body.vehicle;",
-                  "    let fuel = start_fuel_gallons, mile = 0, detour = 0;",
-                  "    for (const stop of body.fuel_stops) {",
-                  "        const driven = stop.miles_from_start - mile + detour + stop.off_route_miles;",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "        pm.expect(stop.fuel_on_arrival_gallons, `arrival at stop ${stop.number}`).to.be.at.least(0);",
-                  "        fuel = stop.fuel_on_arrival_gallons + stop.gallons_purchased;",
-                  "        pm.expect(fuel, `tank after stop ${stop.number}`).to.be.at.most(tank_gallons + 0.01);",
-                  "        mile = stop.miles_from_start;",
-                  "        detour = stop.off_route_miles;",
-                  "    }",
-                  "    const driven = body.route.distance_miles - mile + detour;",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.closeTo(fuel - driven / mpg, 0.03);",
-                  "    pm.expect(end_fuel_gallons, \"fuel at the finish\").to.be.at.least(0);",
-                  "});",
-                  "",
-                  "pm.test(\"total cost is the sum of the stops\", () => {",
-                  "    const sum = body.fuel_stops.reduce((total, stop) => total + stop.cost, 0);",
-                  "    pm.expect(body.summary.total_fuel_cost).to.be.closeTo(sum, 0.05);",
-                  "});",
-                  "",
-                  "pm.test(\"at most one routing call\", () => {",
-                  "    pm.expect(body.meta.external_api_calls.routing).to.be.at.most(1);",
-                  "});",
-                  "",
-                  "// Visualize tab: the stops, and the route drawn as an SVG (no map tiles needed).",
-                  "const line = body.map.geojson.features.find((f) => f.properties.kind === \"route\").geometry.coordinates;",
-                  "const lons = line.map((c) => c[0]), lats = line.map((c) => c[1]);",
-                  "const kx = Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);",
-                  "const minX = Math.min(...lons) * kx, maxX = Math.max(...lons) * kx, minY = Math.min(...lats), maxY = Math.max(...lats);",
-                  "const W = 680, pad = 26;",
-                  "let scale = (W - 2 * pad) / Math.max(maxX - minX, 1e-6);",
-                  "if ((maxY - minY) * scale > 330) scale = 330 / Math.max(maxY - minY, 1e-6);",
-                  "const H = Math.round((maxY - minY) * scale + 2 * pad);",
-                  "const xy = ([lon, lat]) => [(pad + (lon * kx - minX) * scale).toFixed(1), (pad + (maxY - lat) * scale).toFixed(1)];",
-                  "const path = line.map((c, i) => (i ? \"L\" : \"M\") + xy(c).join(\",\")).join(\" \");",
-                  "const pin = (lon, lat, color, label) => {",
-                  "    const [x, y] = xy([lon, lat]);",
-                  "    return `<circle cx=\"${x}\" cy=\"${y}\" r=\"10\" fill=\"${color}\" stroke=\"#fff\" stroke-width=\"2\"/>` +",
-                  "        `<text x=\"${x}\" y=\"${y}\" dy=\"3.5\" text-anchor=\"middle\" font-size=\"10\" font-weight=\"700\" fill=\"#fff\">${label}</text>`;",
-                  "};",
-                  "const pins = [",
-                  "    pin(body.start.longitude, body.start.latitude, \"#16a34a\", \"A\"),",
-                  "    ...body.fuel_stops.map((s) => pin(s.longitude, s.latitude, \"#f59e0b\", s.number)),",
-                  "    pin(body.finish.longitude, body.finish.latitude, \"#dc2626\", \"B\"),",
-                  "].join(\"\");",
-                  "const rows = body.fuel_stops.map((s) => `<tr><td><span class=\"n\">${s.number}</span></td><td>${s.name}<br><small>${s.city}, ${s.state} · mile ${Math.round(s.miles_from_start).toLocaleString()}</small></td><td>$${s.price_per_gallon.toFixed(3)}</td><td>${s.gallons_purchased.toFixed(1)} gal</td><td>$${s.cost.toFixed(2)}</td></tr>`).join(\"\");",
-                  "pm.visualizer.set(`",
-                  "<style>",
-                  "  body { font: 13px -apple-system, \"Segoe UI\", Roboto, sans-serif; color: #0f172a; margin: 0; }",
-                  "  header { padding: 12px 14px 6px; } h3 { margin: 0 0 4px; font-size: 15px; } .muted { color: #64748b; }",
-                  "  svg { display: block; margin: 4px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }",
-                  "  table { border-collapse: collapse; width: 100%; } td, th { padding: 7px 14px; border-top: 1px solid #e2e8f0; text-align: left; }",
-                  "  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }",
-                  "  .n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f59e0b; color: #fff; font-weight: 700; font-size: 11px; }",
-                  "</style>",
-                  "<header>",
-                  "  <h3>${body.start.label} → ${body.finish.label}</h3>",
-                  "  <div class=\"muted\">${body.route.distance_miles.toLocaleString()} mi · ${body.summary.number_of_stops} stops ·",
-                  "  fuel $${body.summary.total_fuel_cost.toFixed(2)} · ${body.meta.external_api_calls.routing} routing call(s)</div>",
-                  "</header>",
-                  "<svg width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"7\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  <path d=\"${path}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"3.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>",
-                  "  ${pins}",
-                  "</svg>",
-                  "<table><tr><th>#</th><th>Station</th><th>Price</th><th>Buy</th><th>Cost</th></tr>${rows}</table>",
-                  "`);"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/route/?start=41.8781,-87.6298&finish=77002",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "route",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "start",
-                  "value": "41.8781,-87.6298"
-                },
-                {
-                  "key": "finish",
-                  "value": "77002"
-                }
-              ]
-            },
-            "description": "Chicago (lat,lon) to downtown Houston (ZIP). Both are resolved offline."
           }
         },
         {
@@ -711,6 +532,57 @@
                 {
                   "key": "start",
                   "value": "Chicago, IL"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Not a number → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error code invalid_request\", () => pm.expect(pm.response.json().error.code).to.eql(\"invalid_request\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/?start=Chicago, IL&finish=Denver, CO&mpg=nan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Denver, CO"
+                },
+                {
+                  "key": "mpg",
+                  "value": "nan"
                 }
               ]
             },
@@ -853,6 +725,57 @@
                 {
                   "key": "finish",
                   "value": "Denver, CO"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Starting fuel reaches no station → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code start_fuel_too_low\", () => pm.expect(pm.response.json().error.code).to.eql(\"start_fuel_too_low\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/route/?start=Chicago, IL&finish=Denver, CO&start_fuel_gallons=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Chicago, IL"
+                },
+                {
+                  "key": "finish",
+                  "value": "Denver, CO"
+                },
+                {
+                  "key": "start_fuel_gallons",
+                  "value": "0"
                 }
               ]
             },

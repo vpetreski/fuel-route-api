@@ -1,0 +1,45 @@
+# Requests for the VS Code REST Client or the JetBrains
+# HTTP client. The same requests, with tests: postman/.
+
+@baseUrl = http://localhost:8000
+
+### Health: stations loaded, routing providers
+GET {{baseUrl}}/api/v1/health/
+
+### New York to Los Angeles
+GET {{baseUrl}}/api/v1/route/
+    ?start=New York, NY
+    &finish=Los Angeles, CA
+
+### Chicago to Denver with half a tank (JSON body)
+POST {{baseUrl}}/api/v1/route/
+Content-Type: application/json
+
+{
+  "start": "Chicago, IL",
+  "finish": "Denver, CO",
+  "start_fuel_gallons": 25
+}
+
+### Whole-trip fuel cost: the same fuel at both ends
+GET {{baseUrl}}/api/v1/route/
+    ?start=Chicago, IL
+    &finish=Denver, CO
+    &start_fuel_gallons=25
+    &end_fuel_gallons=25
+
+### Coordinates to a ZIP code (both resolved offline)
+GET {{baseUrl}}/api/v1/route/
+    ?start=41.8781,-87.6298
+    &finish=77002
+
+### Cheapest possible: no per-stop penalty, more stops
+GET {{baseUrl}}/api/v1/route/
+    ?start=Seattle, WA
+    &finish=Miami, FL
+    &stop_penalty=0
+
+### Outside the USA: 422
+GET {{baseUrl}}/api/v1/route/
+    ?start=Toronto, Canada
+    &finish=Chicago, IL
