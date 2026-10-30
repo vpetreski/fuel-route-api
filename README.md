@@ -17,6 +17,13 @@ coast.
 
 ![Fuel plan map](docs/map.png)
 
+## Demo video
+
+A four-minute demo is included in the repository: [`docs/fuel-route-api-demo.mp4`](docs/fuel-route-api-demo.mp4)
+(3:57, 1080p). It shows the API answering requests in VS Code's REST Client, the map page, the tests and a quick
+tour of the code. GitHub doesn't play videos in the browser: download it from the file's page, or play it from a
+clone.
+
 ## Running it
 
 **Docker** (nothing else needed; settings go in an optional `.env`, see `.env.example`):
@@ -237,6 +244,7 @@ planner/      the API: location resolution, routing client, corridor search, opt
 geo/          plain geometry: distances, point-in-polygon, polyline decoding, simplification, gazetteer
 data/         price file, station coordinates, Census places/ZIP codes/boundaries (all committed)
 scripts/      build_geodata.py: rebuilds the Census files in data/
+docs/         the README's map image and the demo video (fuel-route-api-demo.mp4)
 postman/      Postman collection and environment
 tests/        pytest suite (no network: HTTP is mocked; `pytest -m live` hits the real routing service)
 ```
