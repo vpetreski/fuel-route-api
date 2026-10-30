@@ -36,7 +36,7 @@ python manage.py import_fuel_prices      # ~2 s: 6,738 stops, coordinates includ
 python manage.py runserver
 ```
 
-A Postman collection with example requests, tests and a map visualisation is in `postman/`; `requests.http` has
+A Postman collection with example requests, tests and a map visualization is in `postman/`; `requests.http` has
 the same requests for the VS Code REST Client or the JetBrains HTTP client.
 
 ## API

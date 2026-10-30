@@ -104,7 +104,7 @@ class Gazetteer:
         return self._zips.get(match.group(1)) if match else None
 
     def lookup(self, query: str) -> Place | None:
-        """Resolve "City, ST", "City, State", "City ST" or a ZIP code; None when not recognised."""
+        """Resolve "City, ST", "City, State", "City ST" or a ZIP code; None when not recognized."""
         text = _COUNTRY_SUFFIX.sub("", " ".join(query.split())).strip(" ,")
         if not text:
             return None
