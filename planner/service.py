@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from stations.index import StationIndex, get_station_index
 
 from .corridor import stations_along
-from .exceptions import NoFuelStopInRange
+from .exceptions import NoFuelStopInRange, StartFuelTooLow
 from .locations import Location, resolve
-from .optimizer import Candidate, FuelPlan, NoFuelInRange, Vehicle, plan_fuel_stops
+from .optimizer import Candidate, FuelPlan, NoFuelInRange, NotEnoughStartFuel, Vehicle, plan_fuel_stops
 from .routing import Route, get_route
 
 
@@ -19,6 +19,7 @@ class TripOptions:
     start_fuel_gallons: float | None  # None: full tank
     stop_penalty: float
     corridor_miles: float
+    end_fuel_gallons: float = 0.0  # arrive with at least this much
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class TripPlan:
     routing_calls: int
     geocoding_calls: int
     timings_ms: dict[str, float]
+    options: TripOptions
 
 
 def plan_trip(start: str, finish: str, options: TripOptions) -> TripPlan:
@@ -69,8 +71,13 @@ def plan_trip(start: str, finish: str, options: TripOptions) -> TripPlan:
             candidates,
             vehicle,
             start_gallons=options.start_fuel_gallons,
+            end_gallons=options.end_fuel_gallons,
             stop_penalty=options.stop_penalty,
         )
+    except NotEnoughStartFuel as exc:
+        raise StartFuelTooLow(
+            str(exc), reach_miles=round(exc.reach_miles, 1), first_station_mile=round(exc.first_station_mile, 1)
+        ) from exc
     except NoFuelInRange as exc:
         raise NoFuelStopInRange(
             str(exc), gap_start_mile=round(exc.from_mile, 1), gap_end_mile=round(exc.to_mile, 1)
@@ -88,6 +95,7 @@ def plan_trip(start: str, finish: str, options: TripOptions) -> TripPlan:
         routing_calls=routed.calls,
         geocoding_calls=origin_calls + destination_calls,
         timings_ms=timings,
+        options=options,
     )
 
 

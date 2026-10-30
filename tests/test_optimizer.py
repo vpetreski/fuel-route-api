@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.optimize import Bounds, LinearConstraint, linprog, milp
 
-from planner.optimizer import Candidate, NoFuelInRange, Vehicle, plan_fuel_stops
+from planner.optimizer import Candidate, NoFuelInRange, NotEnoughStartFuel, Vehicle, plan_fuel_stops
 
 TRUCK = Vehicle(max_range_miles=500, mpg=10)
 
@@ -101,8 +101,30 @@ def test_unreachable_destination_is_reported():
 
 
 def test_station_beyond_the_start_fuel_is_unreachable():
-    with pytest.raises(NoFuelInRange):
+    with pytest.raises(NotEnoughStartFuel) as error:
         plan_fuel_stops(300, stations((100, 3.0)), TRUCK, start_gallons=5)
+    assert (error.value.reach_miles, error.value.first_station_mile) == (50, 100)
+    assert "does not reach the first station" in str(error.value)
+
+
+def test_arrives_with_the_requested_fuel():
+    plan = plan_fuel_stops(600, stations((300, 3.0)), TRUCK, end_gallons=20)
+    [stop] = plan.stops
+    assert stop.arrival_gallons == pytest.approx(20.0)
+    assert stop.gallons == pytest.approx(30.0)  # 30 for the last 300 miles, 20 to keep
+    assert plan.end_gallons == pytest.approx(20.0)
+
+
+def test_same_fuel_at_both_ends_buys_all_the_fuel_burned():
+    plan = plan_fuel_stops(900, stations((200, 3.0), (450, 2.8), (700, 3.2)), TRUCK, start_gallons=25, end_gallons=25)
+    assert plan.gallons_bought == pytest.approx(90.0)
+    assert plan.end_gallons == pytest.approx(25.0)
+
+
+def test_requested_end_fuel_needs_a_station_near_the_finish():
+    with pytest.raises(NoFuelInRange) as error:
+        plan_fuel_stops(600, stations((100, 3.0)), TRUCK, end_gallons=50)
+    assert "needs a station within 0 miles of the finish" in str(error.value)
 
 
 def lp_optimum(route_miles, candidates, vehicle, start):
@@ -125,7 +147,7 @@ def lp_optimum(route_miles, candidates, vehicle, start):
     return result.fun if result.status == 0 else None
 
 
-def milp_optimum(route_miles, candidates, vehicle, start, penalty):
+def milp_optimum(route_miles, candidates, vehicle, start, penalty, end=0.0):
     """Exact optimum with detours and a per-stop penalty (a MILP: gallons x_i and stop flags y_i)."""
     n, m, tank = len(candidates), vehicle.mpg, vehicle.tank_gallons
     s = np.array([c.mile for c in candidates])
@@ -154,7 +176,7 @@ def milp_optimum(route_miles, candidates, vehicle, start, penalty):
         link[i], link[n + i] = 1, -tank
         add(link, -np.inf, 0)  # buy only where stopping
     finish = np.concatenate((np.ones(n), -2 * d / m))
-    add(finish, route_miles / m - start, np.inf)
+    add(finish, route_miles / m - start + end, np.inf)  # arrive with at least `end`
 
     cost = np.concatenate(([c.price for c in candidates], np.full(n, penalty)))
     result = milp(
@@ -213,6 +235,25 @@ def test_matches_the_exact_optimum_with_detours_and_stop_penalty():
         assert plan.total_cost + penalty * len(plan.stops) == pytest.approx(expected, abs=1e-4)
         compared += 1
     assert compared > 25
+
+
+def test_matches_the_exact_optimum_when_arriving_with_fuel():
+    rng = np.random.default_rng(19)
+    compared = 0
+    for _ in range(60):
+        route, candidates, start = random_instance(rng, detours=True)
+        penalty = float(rng.choice([0.0, 5.0]))
+        end = float(rng.choice([5.0, 20.0, 35.0]))
+        expected = milp_optimum(route, candidates, TRUCK, start, penalty, end=end)
+        if expected is None:
+            with pytest.raises(NoFuelInRange):
+                plan_fuel_stops(route, candidates, TRUCK, start_gallons=start, end_gallons=end, stop_penalty=penalty)
+            continue
+        plan = plan_fuel_stops(route, candidates, TRUCK, start_gallons=start, end_gallons=end, stop_penalty=penalty)
+        assert plan.end_gallons >= end - 1e-9
+        assert plan.total_cost + penalty * len(plan.stops) == pytest.approx(expected, abs=1e-4)
+        compared += 1
+    assert compared > 15
 
 
 def off_grid_instance(rng):

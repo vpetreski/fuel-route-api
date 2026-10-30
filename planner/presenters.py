@@ -33,6 +33,11 @@ def trip_payload(plan: TripPlan, map_url: str) -> dict:
             "start_fuel_gallons": round(fuel.start_gallons, 2),
             "end_fuel_gallons": round(fuel.end_gallons, 2),
         },
+        "options": {
+            "stop_penalty": plan.options.stop_penalty,
+            "end_fuel_gallons": plan.options.end_fuel_gallons,
+            "corridor_miles": plan.options.corridor_miles,
+        },
         "map": {"url": map_url, "geojson": _feature_collection(plan, stops)},
         "meta": {
             "external_api_calls": {

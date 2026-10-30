@@ -10,6 +10,11 @@ class TripRequestSerializer(serializers.Serializer):
     max_range_miles = serializers.FloatField(required=False, min_value=50, max_value=3000)
     mpg = serializers.FloatField(required=False, min_value=1, max_value=150)
     start_fuel_gallons = serializers.FloatField(required=False, min_value=0, help_text="Defaults to a full tank.")
+    end_fuel_gallons = serializers.FloatField(
+        required=False,
+        min_value=0,
+        help_text="Arrive with at least this much. Equal to the start fuel, the cost covers all the fuel burned.",
+    )
     stop_penalty = serializers.FloatField(
         required=False, min_value=0, max_value=1000, help_text="USD charged per stop when choosing stops."
     )
@@ -19,10 +24,9 @@ class TripRequestSerializer(serializers.Serializer):
         attrs.setdefault("mpg", settings.VEHICLE_MPG)
         attrs.setdefault("stop_penalty", settings.FUEL_STOP_PENALTY_USD)
         tank = attrs["max_range_miles"] / attrs["mpg"]
-        if attrs.get("start_fuel_gallons", 0) > tank + 1e-9:
-            raise serializers.ValidationError(
-                {"start_fuel_gallons": f"Cannot exceed the tank size ({tank:g} gallons)."}
-            )
+        for name in ("start_fuel_gallons", "end_fuel_gallons"):
+            if attrs.get(name, 0) > tank + 1e-9:
+                raise serializers.ValidationError({name: f"Cannot exceed the tank size ({tank:g} gallons)."})
         return attrs
 
     def to_options(self) -> TripOptions:
@@ -33,4 +37,5 @@ class TripRequestSerializer(serializers.Serializer):
             start_fuel_gallons=data.get("start_fuel_gallons"),
             stop_penalty=data["stop_penalty"],
             corridor_miles=settings.ROUTE_CORRIDOR_MILES,
+            end_fuel_gallons=data.get("end_fuel_gallons", 0.0),
         )

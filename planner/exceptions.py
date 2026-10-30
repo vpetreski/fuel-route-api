@@ -33,6 +33,10 @@ class NoFuelStopInRange(PlanningError):
     code = "no_fuel_stop_in_range"
 
 
+class StartFuelTooLow(PlanningError):
+    code = "start_fuel_too_low"
+
+
 class UpstreamUnavailable(PlanningError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = "upstream_unavailable"
