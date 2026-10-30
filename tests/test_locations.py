@@ -27,6 +27,11 @@ def test_invalid_coordinates():
         resolve("123.0,45.0")
 
 
+def test_out_of_range_latitude_that_is_a_swapped_pair_gets_a_hint():
+    with pytest.raises(LocationNotFound, match="swap the two numbers"):
+        resolve("-122.4194,37.7749")  # San Francisco, as longitude,latitude
+
+
 def test_place_and_zip_are_resolved_offline(http):
     place, calls = resolve("Big Cabin, OK")
     assert (place.label, place.source, calls) == ("Big Cabin, OK", "place", 0)

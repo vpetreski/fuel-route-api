@@ -54,7 +54,10 @@ def resolve(query: str) -> tuple[Location, int]:
     if match := COORDINATES.match(text):
         lat, lon = float(match[1]), float(match[2])
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-            raise LocationNotFound(f"'{query}' is not a valid latitude,longitude pair.", query=query)
+            hint = ""
+            if -90 <= lon <= 90 and -180 <= lat <= 180 and usa().contains(lon, lat, COAST_TOLERANCE_MILES):
+                hint = " It looks like longitude,latitude: swap the two numbers."
+            raise LocationNotFound(f"'{query}' is not a valid latitude,longitude pair.{hint}", query=query)
         if not usa().contains(lat, lon, COAST_TOLERANCE_MILES):
             hint = ""
             if usa().contains(lon, lat, COAST_TOLERANCE_MILES):
